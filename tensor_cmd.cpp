@@ -33,12 +33,12 @@ namespace qsyn::tensor
     {
         std::vector<two_level_matrix> two_level_chain;
         fmt::println("start decomposing... {}", *t);
+        using namespace std::literals;
 
+        (*t) = {{0.25 + 1.i, 0.5 + 3.i}, // test
+                {0.75 + 0.i, 0.8 + 0.i}};
         size_t s = (*t).shape()[0];
         fmt::println("shape : {} * {}", s, s);
-
-        // (*t) = { {0.25+ 1.i, 0.5+3.i},
-        //          {}}
 
         QTensor<double>
             U = QTensor<double>::identity((int)round(std::log2(s)));
@@ -111,19 +111,22 @@ namespace qsyn::tensor
                 // std::complex<double> a = (*t)(i, i);
                 // std::complex<double> b = (*t)(j, i);
 
-                two_level_matrix m(U);
-                two_level_chain.push_back(m);
-                fmt::println("get");
-
-                fmt::println("decompose once {},{}", i, j);
+                (*t) = tensordot(U, *t, {1}, {0});
 
                 // U(ii/ij/ji/jj) adjust
+                U(i, i) = std::conj(U(i, i));
+                U(i, j) = std::conj(U(i, j));
+                U(j, i) = std::conj(U(j, i));
+                std::swap(U(i, j), U(j, i));
+                U(j, j) = std::conj(U(j, j));
 
-                // *t  = tensordot(U, *t, {1}, {0});
+                two_level_matrix m(U);
+                m.i = i;
+                m.j = j;
+                two_level_chain.push_back(m);
 
-                // two_level_chain.emplace_back(U')
-
-                // if *t is 2-level, end
+                fmt::println("decompose once {},{}", i, j);
+                // if *t is 2-level, end ?
             }
         }
         return two_level_chain;
@@ -193,7 +196,8 @@ namespace qsyn::tensor
 
                     std::vector<two_level_matrix> tlc = decompose(tensor);
 
-                    fmt::println("{}", tlc[0].given);
+                    fmt::println("U1': {}", tlc[0].given);
+                    fmt::println("result : {}", *tensor);
                     return CmdExecResult::done;
                 }};
     }
