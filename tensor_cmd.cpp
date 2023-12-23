@@ -19,181 +19,298 @@ using namespace dvlab::argparse;
 using dvlab::CmdExecResult;
 using dvlab::Command;
 
-namespace qsyn::tensor {
+namespace qsyn::tensor
+{
 
-QTensor<double> decompose(QTensor<double>* t) {
-    QTensor<double> two_level_chain;
-    fmt::println("start decomposing... {}", *t);
-
-    size_t s = (*t).shape()[0];
-
-    for (size_t i = 0; i < s; i++) {
-        for (size_t j = 0; j < i; j++) {
-            // if (*t)(i,i)!=1 && (*t)(j,i)!=0 (maybe use e-6 approx.)
-
-            // create an Identity  U by tensor_product_pow(I,lg2(s))
-
-            // take a, b from (*t)(i,i) & (*t)(j,i)
-
-            // U(ii/ij/ji/jj) adjust
-
-            // *t  = tensordot(U, *t, {1}, {0});
-
-            // two_level_chain.emplace_back(U')
-
-            // if *t is 2-level, end
-        }
-    }
-    return two_level_chain;
-}
-
-ArgType<size_t>::ConstraintType valid_tensor_id(TensorMgr const& tensor_mgr) {
-    return [&](size_t const& id) {
-        if (tensor_mgr.is_id(id)) return true;
-        spdlog::error("Cannot find tensor with ID {}!!", id);
-        return false;
+    struct two_level_matrix
+    {
+        QTensor<double> given;
+        size_t i, j;
+        two_level_matrix(QTensor<double> U) : given(U) {}
     };
-}
 
-Command tensor_print_cmd(TensorMgr& tensor_mgr) {
-    return {"print",
-            [&](ArgumentParser& parser) {
-                parser.description("print info of Tensor");
+    std::vector<two_level_matrix> decompose(QTensor<double> *t)
+    {
+        std::vector<two_level_matrix> two_level_chain;
+        fmt::println("start decomposing... {}", *t);
 
-                parser.add_argument<size_t>("id")
-                    .constraint(valid_tensor_id(tensor_mgr))
-                    .nargs(NArgsOption::optional)
-                    .help("if specified, print the tensor with the ID");
-            },
-            [&](ArgumentParser const& parser) {
-                if (parser.parsed("id")) {
-                    fmt::println("{}", *tensor_mgr.find_by_id(parser.get<size_t>("id")));
-                } else {
-                    fmt::println("{}", *tensor_mgr.get());
-                }
-                return CmdExecResult::done;
-            }};
-}
+        size_t s = (*t).shape()[0];
+        fmt::println("shape : {} * {}", s, s);
 
-Command tensor_decompose_cmd(TensorMgr& tensor_mgr) {
-    return {"decompose",
-            [&](ArgumentParser& parser) {
-                parser.description("Decompose the unitary matrix into multi two level matrix");
+        // (*t) = { {0.25+ 1.i, 0.5+3.i},
+        //          {}}
 
-                parser.add_argument<size_t>("id")
-                    .constraint(valid_tensor_id(tensor_mgr))
-                    .nargs(NArgsOption::optional)
-                    .help("if specified, decompose the tensor with the ID");
-            },
-            [&](ArgumentParser const& parser) {
-                QTensor<double>* tensor;
+        QTensor<double>
+            U = QTensor<double>::identity((int)round(std::log2(s)));
+        // QTensor<double> I = QTensor<double>::identity(1);
+        // QTensor<double> U = tensor_product_pow(I, (int)round(std::log2(s)));
+        U.reshape({s, s});
 
-                if (parser.parsed("id")) {
-                    tensor = tensor_mgr.find_by_id(parser.get<size_t>("id"));
-                } else {
-                    tensor = tensor_mgr.get();
-                }
-
-                QTensor<double> tlc = decompose(tensor);
-
-                fmt::println("{}", tlc);
-                return CmdExecResult::done;
-            }};
-}
-
-Command tensor_adjoint_cmd(TensorMgr& tensor_mgr) {
-    return {"adjoint",
-            [&](ArgumentParser& parser) {
-                parser.description("adjoint the specified tensor");
-
-                parser.add_argument<size_t>("id")
-                    .constraint(valid_tensor_id(tensor_mgr))
-                    .nargs(NArgsOption::optional)
-                    .help("the ID of the tensor");
-            },
-            [&](ArgumentParser const& parser) {
-                if (parser.parsed("id")) {
-                    tensor_mgr.find_by_id(parser.get<size_t>("id"))->adjoint();
-                } else {
-                    tensor_mgr.get()->adjoint();
-                }
-                return CmdExecResult::done;
-            }};
-}
-Command tensor_equivalence_check_cmd(TensorMgr& tensor_mgr) {
-    return {"equiv",
-            [&](ArgumentParser& parser) {
-                parser.description("check the equivalency of two stored tensors");
-
-                parser.add_argument<size_t>("ids")
-                    .nargs(1, 2)
-                    .constraint(valid_tensor_id(tensor_mgr))
-                    .help("Compare the two tensors. If only one is specified, compare with the tensor on focus");
-                parser.add_argument<double>("-e", "--epsilon")
-                    .metavar("eps")
-                    .default_value(1e-6)
-                    .help("output \"equivalent\" if the Frobenius inner product is at least than 1 - eps (default: 1e-6)");
-                parser.add_argument<bool>("-s", "--strict")
-                    .help("requires global scaling factor to be 1")
-                    .action(store_true);
-            },
-            [&](ArgumentParser const& parser) {
-                auto ids    = parser.get<std::vector<size_t>>("ids");
-                auto eps    = parser.get<double>("--epsilon");
-                auto strict = parser.get<bool>("--strict");
-
-                QTensor<double>* tensor1 = nullptr;
-                QTensor<double>* tensor2 = nullptr;
-                if (ids.size() == 2) {
-                    tensor1 = tensor_mgr.find_by_id(ids[0]);
-                    tensor2 = tensor_mgr.find_by_id(ids[1]);
-                } else {
-                    tensor1 = tensor_mgr.get();
-                    tensor2 = tensor_mgr.find_by_id(ids[0]);
-                }
-
-                bool equiv       = is_equivalent(*tensor1, *tensor2, eps);
-                auto const norm  = global_norm(*tensor1, *tensor2);
-                auto const phase = global_phase(*tensor1, *tensor2);
-
-                if (strict) {
-                    if (norm > 1 + eps || norm < 1 - eps || phase != dvlab::Phase(0)) {
-                        equiv = false;
+        for (size_t i = 0; i < s; i++)
+        {
+            for (size_t j = i + 1; j < s; j++)
+            {
+                if (std::abs((*t)(i, i).real() - 1) < 1e-6 && std::abs((*t)(i, i).imag()) < 1e-6)
+                { // maybe use e-6 approx.
+                    if (std::abs((*t)(j, i).real()) < 1e-6 && std::abs((*t)(j, i).imag()) < 1e-6)
+                    {
+                        fmt::println("skip cuz (1,0) {},{}", i, j);
+                        continue;
                     }
                 }
-                using namespace dvlab;
-                if (equiv) {
-                    fmt::println("{}", fmt_ext::styled_if_ansi_supported("Equivalent", fmt::fg(fmt::terminal_color::green) | fmt::emphasis::bold));
-                    fmt::println("- Global Norm : {:.6}", norm);
-                    fmt::println("- Global Phase: {}", phase);
-                } else {
-                    fmt::println("{}", fmt_ext::styled_if_ansi_supported("Not Equivalent", fmt::fg(fmt::terminal_color::red) | fmt::emphasis::bold));
+                if (std::abs((*t)(i, i).real()) < 1e-6 && std::abs((*t)(i, i).imag()) < 1e-6)
+                { // maybe use e-6 approx.
+                    if (std::abs((*t)(j, i).real()) < 1e-6 && std::abs((*t)(j, i).imag()) < 1e-6)
+                    {
+                        fmt::println("skip cuz (0,0) {},{}", i, j);
+                        continue;
+                    }
                 }
 
-                return CmdExecResult::done;
-            }};
-}
+                double u = std::sqrt(std::norm((*t)(i, i)) + std::norm((*t)(j, i)));
+                fmt::println("u = {}", u);
 
-Command tensor_cmd(TensorMgr& tensor_mgr) {
-    using namespace dvlab::utils;
-    auto cmd = mgr_root_cmd(tensor_mgr);
-    cmd.add_subcommand(mgr_list_cmd(tensor_mgr));
-    cmd.add_subcommand(tensor_print_cmd(tensor_mgr));
-    cmd.add_subcommand(mgr_checkout_cmd(tensor_mgr));
-    cmd.add_subcommand(mgr_delete_cmd(tensor_mgr));
-    cmd.add_subcommand(tensor_adjoint_cmd(tensor_mgr));
-    cmd.add_subcommand(tensor_equivalence_check_cmd(tensor_mgr));
-    cmd.add_subcommand(tensor_decompose_cmd(tensor_mgr));
+                using namespace std::literals;
 
-    return cmd;
-}
+                for (size_t x = 0; x < s; x++)
+                {
+                    for (size_t y = 0; y < s; y++)
+                    {
+                        if (x == y)
+                        {
+                            if (x == i)
+                            {
+                                U(x, y) = (std::conj((*t)(i, i))) / u;
+                            }
+                            else if (x == j)
+                            {
+                                U(x, y) = (*t)(i, i) / u;
+                            }
+                            else
+                            {
+                                U(x, y) = 1.0 + 0.i;
+                            }
+                        }
+                        else if (x == j && y == i)
+                        {
+                            U(x, y) = (-1. + 0.i) * (*t)(j, i) / u;
+                        }
+                        else if (x == i && y == j)
+                        {
+                            U(x, y) = (std::conj((*t)(j, i))) / u;
+                        }
+                        else
+                        {
+                            U(x, y) = 0. + 0.i;
+                        }
+                    }
+                }
+                fmt::println("U = {}", U);
 
-bool add_tensor_cmds(dvlab::CommandLineInterface& cli, TensorMgr& tensor_mgr) {
-    if (!cli.add_command(tensor_cmd(tensor_mgr))) {
-        spdlog::error("Registering \"tensor\" commands fails... exiting");
-        return false;
+                // take a, b from (*t)(i,i) & (*t)(j,i)
+                // std::complex<double> a = (*t)(i, i);
+                // std::complex<double> b = (*t)(j, i);
+
+                two_level_matrix m(U);
+                two_level_chain.push_back(m);
+                fmt::println("get");
+
+                fmt::println("decompose once {},{}", i, j);
+
+                // U(ii/ij/ji/jj) adjust
+
+                // *t  = tensordot(U, *t, {1}, {0});
+
+                // two_level_chain.emplace_back(U')
+
+                // if *t is 2-level, end
+            }
+        }
+        return two_level_chain;
     }
-    return true;
-}
 
-}  // namespace qsyn::tensor
+    ArgType<size_t>::ConstraintType valid_tensor_id(TensorMgr const &tensor_mgr)
+    {
+        return [&](size_t const &id)
+        {
+            if (tensor_mgr.is_id(id))
+                return true;
+            spdlog::error("Cannot find tensor with ID {}!!", id);
+            return false;
+        };
+    }
+
+    Command tensor_print_cmd(TensorMgr &tensor_mgr)
+    {
+        return {"print",
+                [&](ArgumentParser &parser)
+                {
+                    parser.description("print info of Tensor");
+
+                    parser.add_argument<size_t>("id")
+                        .constraint(valid_tensor_id(tensor_mgr))
+                        .nargs(NArgsOption::optional)
+                        .help("if specified, print the tensor with the ID");
+                },
+                [&](ArgumentParser const &parser)
+                {
+                    if (parser.parsed("id"))
+                    {
+                        fmt::println("{}", *tensor_mgr.find_by_id(parser.get<size_t>("id")));
+                    }
+                    else
+                    {
+                        fmt::println("{}", *tensor_mgr.get());
+                    }
+                    return CmdExecResult::done;
+                }};
+    }
+
+    Command tensor_decompose_cmd(TensorMgr &tensor_mgr)
+    {
+        return {"decompose",
+                [&](ArgumentParser &parser)
+                {
+                    parser.description("Decompose the unitary matrix into multi two level matrix");
+
+                    parser.add_argument<size_t>("id")
+                        .constraint(valid_tensor_id(tensor_mgr))
+                        .nargs(NArgsOption::optional)
+                        .help("if specified, decompose the tensor with the ID");
+                },
+                [&](ArgumentParser const &parser)
+                {
+                    QTensor<double> *tensor;
+
+                    if (parser.parsed("id"))
+                    {
+                        tensor = tensor_mgr.find_by_id(parser.get<size_t>("id"));
+                    }
+                    else
+                    {
+                        tensor = tensor_mgr.get();
+                    }
+
+                    std::vector<two_level_matrix> tlc = decompose(tensor);
+
+                    fmt::println("{}", tlc[0].given);
+                    return CmdExecResult::done;
+                }};
+    }
+
+    Command tensor_adjoint_cmd(TensorMgr &tensor_mgr)
+    {
+        return {"adjoint",
+                [&](ArgumentParser &parser)
+                {
+                    parser.description("adjoint the specified tensor");
+
+                    parser.add_argument<size_t>("id")
+                        .constraint(valid_tensor_id(tensor_mgr))
+                        .nargs(NArgsOption::optional)
+                        .help("the ID of the tensor");
+                },
+                [&](ArgumentParser const &parser)
+                {
+                    if (parser.parsed("id"))
+                    {
+                        tensor_mgr.find_by_id(parser.get<size_t>("id"))->adjoint();
+                    }
+                    else
+                    {
+                        tensor_mgr.get()->adjoint();
+                    }
+                    return CmdExecResult::done;
+                }};
+    }
+    Command tensor_equivalence_check_cmd(TensorMgr &tensor_mgr)
+    {
+        return {"equiv",
+                [&](ArgumentParser &parser)
+                {
+                    parser.description("check the equivalency of two stored tensors");
+
+                    parser.add_argument<size_t>("ids")
+                        .nargs(1, 2)
+                        .constraint(valid_tensor_id(tensor_mgr))
+                        .help("Compare the two tensors. If only one is specified, compare with the tensor on focus");
+                    parser.add_argument<double>("-e", "--epsilon")
+                        .metavar("eps")
+                        .default_value(1e-6)
+                        .help("output \"equivalent\" if the Frobenius inner product is at least than 1 - eps (default: 1e-6)");
+                    parser.add_argument<bool>("-s", "--strict")
+                        .help("requires global scaling factor to be 1")
+                        .action(store_true);
+                },
+                [&](ArgumentParser const &parser)
+                {
+                    auto ids = parser.get<std::vector<size_t>>("ids");
+                    auto eps = parser.get<double>("--epsilon");
+                    auto strict = parser.get<bool>("--strict");
+
+                    QTensor<double> *tensor1 = nullptr;
+                    QTensor<double> *tensor2 = nullptr;
+                    if (ids.size() == 2)
+                    {
+                        tensor1 = tensor_mgr.find_by_id(ids[0]);
+                        tensor2 = tensor_mgr.find_by_id(ids[1]);
+                    }
+                    else
+                    {
+                        tensor1 = tensor_mgr.get();
+                        tensor2 = tensor_mgr.find_by_id(ids[0]);
+                    }
+
+                    bool equiv = is_equivalent(*tensor1, *tensor2, eps);
+                    auto const norm = global_norm(*tensor1, *tensor2);
+                    auto const phase = global_phase(*tensor1, *tensor2);
+
+                    if (strict)
+                    {
+                        if (norm > 1 + eps || norm < 1 - eps || phase != dvlab::Phase(0))
+                        {
+                            equiv = false;
+                        }
+                    }
+                    using namespace dvlab;
+                    if (equiv)
+                    {
+                        fmt::println("{}", fmt_ext::styled_if_ansi_supported("Equivalent", fmt::fg(fmt::terminal_color::green) | fmt::emphasis::bold));
+                        fmt::println("- Global Norm : {:.6}", norm);
+                        fmt::println("- Global Phase: {}", phase);
+                    }
+                    else
+                    {
+                        fmt::println("{}", fmt_ext::styled_if_ansi_supported("Not Equivalent", fmt::fg(fmt::terminal_color::red) | fmt::emphasis::bold));
+                    }
+
+                    return CmdExecResult::done;
+                }};
+    }
+
+    Command tensor_cmd(TensorMgr &tensor_mgr)
+    {
+        using namespace dvlab::utils;
+        auto cmd = mgr_root_cmd(tensor_mgr);
+        cmd.add_subcommand(mgr_list_cmd(tensor_mgr));
+        cmd.add_subcommand(tensor_print_cmd(tensor_mgr));
+        cmd.add_subcommand(mgr_checkout_cmd(tensor_mgr));
+        cmd.add_subcommand(mgr_delete_cmd(tensor_mgr));
+        cmd.add_subcommand(tensor_adjoint_cmd(tensor_mgr));
+        cmd.add_subcommand(tensor_equivalence_check_cmd(tensor_mgr));
+        cmd.add_subcommand(tensor_decompose_cmd(tensor_mgr));
+
+        return cmd;
+    }
+
+    bool add_tensor_cmds(dvlab::CommandLineInterface &cli, TensorMgr &tensor_mgr)
+    {
+        if (!cli.add_command(tensor_cmd(tensor_mgr)))
+        {
+            spdlog::error("Registering \"tensor\" commands fails... exiting");
+            return false;
+        }
+        return true;
+    }
+
+} // namespace qsyn::tensor
