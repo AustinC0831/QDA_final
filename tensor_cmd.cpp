@@ -25,18 +25,27 @@ namespace qsyn::tensor
     struct two_level_matrix
     {
         QTensor<double> given;
-        size_t i, j;
+        size_t i, j; // i < j
         two_level_matrix(QTensor<double> U) : given(U) {}
     };
 
     std::vector<two_level_matrix> decompose(QTensor<double> *t)
     {
         std::vector<two_level_matrix> two_level_chain;
-        fmt::println("start decomposing... {}", *t);
-        using namespace std::literals;
+        fmt::println("start decomposing...");
 
-        (*t) = {{0.25 + 1.i, 0.5 + 3.i}, // test
-                {0.75 + 0.i, 0.8 + 0.i}};
+        using namespace std::literals;
+        size_t num = 0;
+
+        (*t) = {
+            {0.353553 + 0.i, 0. + 0.i, -0.612372 + 0.i, 0.707107 + 0.i},
+            {0. + -0.866025i, 0. + 0.i, 0. - 0.5i, 0. + 0.i},
+            {0. + 0.i, 0. + 1.i, 0. + 0.i, 0. + 0.i}, // test
+            {-0.353553 + 0.i, 0. + 0.i, 0.612372 + 0.i, 0.707107 + 0.i},
+        };
+        fmt::println("今天拆解的矩陣是:");
+        fmt::println("{}", *t);
+
         size_t s = (*t).shape()[0];
         fmt::println("shape : {} * {}", s, s);
 
@@ -66,6 +75,9 @@ namespace qsyn::tensor
                         continue;
                     }
                 }
+
+                fmt::println("拆! i = {}, j = {}", i, j);
+                num++;
 
                 double u = std::sqrt(std::norm((*t)(i, i)) + std::norm((*t)(j, i)));
                 fmt::println("u = {}", u);
@@ -105,27 +117,34 @@ namespace qsyn::tensor
                         }
                     }
                 }
-                fmt::println("U = {}", U);
+                // fmt::println("U{}", num);
+                // fmt::println("{}", U);
 
                 // take a, b from (*t)(i,i) & (*t)(j,i)
                 // std::complex<double> a = (*t)(i, i);
                 // std::complex<double> b = (*t)(j, i);
 
                 (*t) = tensordot(U, *t, {1}, {0});
+                // fmt::println("目前結果:");
+                // fmt::println("{}", *t);
 
                 // U(ii/ij/ji/jj) adjust
-                U(i, i) = std::conj(U(i, i));
-                U(i, j) = std::conj(U(i, j));
-                U(j, i) = std::conj(U(j, i));
-                std::swap(U(i, j), U(j, i));
-                U(j, j) = std::conj(U(j, j));
+                QTensor<double>
+                    CU = QTensor<double>::identity(1);
 
-                two_level_matrix m(U);
+                CU(0, 0) = std::conj(U(i, i));
+                CU(0, 1) = std::conj(U(j, i));
+                CU(1, 0) = std::conj(U(i, j));
+                CU(1, 1) = std::conj(U(j, j));
+
+                two_level_matrix m(CU);
                 m.i = i;
                 m.j = j;
                 two_level_chain.push_back(m);
 
-                fmt::println("decompose once {},{}", i, j);
+                fmt::println("CU{}", num);
+                fmt::println("{}", two_level_chain[num - 1].given);
+
                 // if *t is 2-level, end ?
             }
         }
