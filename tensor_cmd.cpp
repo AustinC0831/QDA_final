@@ -43,8 +43,8 @@ namespace qsyn::tensor
             {0. + 0.i, 0. + 1.i, 0. + 0.i, 0. + 0.i}, // test
             {-0.353553 + 0.i, 0. + 0.i, 0.612372 + 0.i, 0.707107 + 0.i},
         };
-        fmt::println("今天拆解的矩陣是:");
-        fmt::println("{}", *t);
+        // fmt::println("今天拆解的矩陣是:");
+        // fmt::println("{}", *t);
 
         size_t s = (*t).shape()[0];
         fmt::println("shape : {} * {}", s, s);
@@ -59,28 +59,30 @@ namespace qsyn::tensor
         {
             for (size_t j = i + 1; j < s; j++)
             {
-                if (std::abs((*t)(i, i).real() - 1) < 1e-6 && std::abs((*t)(i, i).imag()) < 1e-6)
-                { // maybe use e-6 approx.
-                    if (std::abs((*t)(j, i).real()) < 1e-6 && std::abs((*t)(j, i).imag()) < 1e-6)
-                    {
-                        fmt::println("skip cuz (1,0) {},{}", i, j);
-                        continue;
-                    }
-                }
-                if (std::abs((*t)(i, i).real()) < 1e-6 && std::abs((*t)(i, i).imag()) < 1e-6)
-                { // maybe use e-6 approx.
-                    if (std::abs((*t)(j, i).real()) < 1e-6 && std::abs((*t)(j, i).imag()) < 1e-6)
-                    {
-                        fmt::println("skip cuz (0,0) {},{}", i, j);
-                        continue;
-                    }
+                // if (std::abs((*t)(i, i).real() - 1) < 1e-6 && std::abs((*t)(i, i).imag()) < 1e-6) {  // maybe use e-6 approx.
+                //     if (std::abs((*t)(j, i).real()) < 1e-6 && std::abs((*t)(j, i).imag()) < 1e-6) {
+                //         fmt::println("skip cuz (1,0) {},{}", i, j);
+                //         continue;
+                //     }
+                // }
+                // if (std::abs((*t)(i, i).real()) < 1e-6 && std::abs((*t)(i, i).imag()) < 1e-6) {  // maybe use e-6 approx.
+                //     if (std::abs((*t)(j, i).real()) < 1e-6 && std::abs((*t)(j, i).imag()) < 1e-6) {
+                //         fmt::println("skip cuz (0,0) {},{}", i, j);
+                //         continue;
+                //     }
+                // }
+
+                if (std::abs((*t)(j, i).real()) < 1e-6 && std::abs((*t)(j, i).imag()) < 1e-6)
+                {
+                    fmt::println("skip cuz U({},{}) = 0", j, i);
+                    continue;
                 }
 
                 fmt::println("拆! i = {}, j = {}", i, j);
                 num++;
 
                 double u = std::sqrt(std::norm((*t)(i, i)) + std::norm((*t)(j, i)));
-                fmt::println("u = {}", u);
+                // fmt::println("u = {}", u);
 
                 using namespace std::literals;
 
@@ -142,10 +144,70 @@ namespace qsyn::tensor
                 m.j = j;
                 two_level_chain.push_back(m);
 
-                fmt::println("CU{}", num);
-                fmt::println("{}", two_level_chain[num - 1].given);
+                // fmt::println("CU{}", num);
+                // fmt::println("{}", two_level_chain[num - 1].given);
 
-                // if *t is 2-level, end ?
+                // check if *t is 2-level ,end
+
+                size_t count = 0;
+                size_t c_i = 1073741824; // 2^30
+                size_t c_j = 1073741824; // 2^30
+                bool is_two_level = true;
+
+                for (size_t x = 0; x < s; x++)
+                { // check all
+
+                    if (!is_two_level)
+                        break;
+
+                    for (size_t y = 1; y < x; y++)
+                    {
+                        if (std::abs((*t)(y, x).real()) > 1e-6 || std::abs((*t)(y, x).imag()) > 1e-6)
+                        { // entry(j,i)!=0
+                            count++;
+
+                            if (count == 1)
+                            {
+                                c_i = y;
+                                c_j = x;
+                            }
+                            else
+                            {
+                                is_two_level = false;
+                            }
+                        }
+                    }
+                }
+
+                for (size_t x = 0; x < s; x++)
+                {
+                    if ((c_i == 1073741824) || !is_two_level)
+                        break;
+                    if (std::abs((*t)(x, x).real() - 1) > 1e-6 || std::abs((*t)(x, x).imag()) > 1e-6)
+                    { // entry(x,x)!=1
+
+                        if (x != c_i && x != c_j)
+                        {
+                            is_two_level = false;
+                        }
+                    }
+                }
+                if (is_two_level == true)
+                {
+                    CU(0, 0) = std::conj((*t)(c_i, c_i));
+                    CU(0, 1) = std::conj((*t)(c_j, c_i));
+                    CU(1, 0) = std::conj((*t)(c_i, c_j));
+                    CU(1, 1) = std::conj((*t)(c_j, c_j));
+                    two_level_matrix m(CU);
+                    m.i = c_i;
+                    m.j = c_j;
+                    two_level_chain.push_back(m);
+                    fmt::println("find *t has been 2 level matrix, put it in the chain");
+                    // fmt::println("{}", CU);
+                    // fmt::println("in the chain");
+
+                    return two_level_chain;
+                }
             }
         }
         return two_level_chain;
@@ -215,8 +277,13 @@ namespace qsyn::tensor
 
                     std::vector<two_level_matrix> tlc = decompose(tensor);
 
-                    fmt::println("U1': {}", tlc[0].given);
-                    fmt::println("result : {}", *tensor);
+                    for (size_t i = 0; i < tlc.size(); i++)
+                    {
+                        fmt::println("U{}' = {}", i, tlc[i].given);
+                        fmt::println("work on i = {}, j = {}", tlc[i].i, tlc[i].j);
+                    }
+
+                    fmt::println("final U(*t) : {}", *tensor);
                     return CmdExecResult::done;
                 }};
     }
